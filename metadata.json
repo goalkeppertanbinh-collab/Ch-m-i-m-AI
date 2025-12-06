@@ -1,0 +1,7 @@
+{
+  "name": "AI Grader VN",
+  "description": "Ứng dụng chấm điểm bài tập tự động bằng Camera và AI.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
