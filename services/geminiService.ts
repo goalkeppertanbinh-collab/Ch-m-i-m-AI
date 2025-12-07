@@ -22,11 +22,15 @@ const gradingSchema: Schema = {
   properties: {
     score: {
       type: Type.NUMBER,
-      description: "Điểm số trên thang điểm 100",
+      description: "Tổng số điểm học sinh đạt được (Số thực, ví dụ: 8.25, 9.5).",
+    },
+    maxScore: {
+      type: Type.NUMBER,
+      description: "Tổng điểm tối đa của bài thi dựa trên file đáp án/thang điểm (thường là 10, 20, 40, 50 hoặc 100).",
     },
     letterGrade: {
       type: Type.STRING,
-      description: "Điểm chữ (A, B, C, D, F)",
+      description: "Điểm chữ quy đổi (A, B, C, D, F)",
     },
     summary: {
       type: Type.STRING,
@@ -63,7 +67,7 @@ const gradingSchema: Schema = {
       }
     }
   },
-  required: ["score", "letterGrade", "summary", "details"],
+  required: ["score", "maxScore", "letterGrade", "summary", "details"],
 };
 
 export const gradeSubmission = async (
@@ -88,36 +92,30 @@ export const gradeSubmission = async (
       parts.push({ inlineData: { mimeType: answerKeyFile.mimeType, data: cleanKeyData } });
     }
 
-    // 3. Construct Text Prompt with Auto-Detection Logic
+    // 3. Construct Text Prompt with Advanced Logic
     let prompt = `
-      Bạn là một Giáo viên giỏi tại Việt Nam, thấu hiểu sâu sắc **Chương trình Giáo dục Phổ thông 2018**.
+      Bạn là một Giám khảo chấm thi chuyên nghiệp và tỉ mỉ.
       
-      NHIỆM VỤ:
-      1. **Nhận diện**: Tự động xác định Môn học và Cấp học (Tiểu học / THCS) thông qua nội dung bài làm.
-      2. **Chấm điểm**: Đánh giá bài làm (${base64Images.length} trang ảnh) dựa trên đáp án mẫu và quy tắc chấm chuyên biệt bên dưới.
-
-      === QUY TẮC CHẤM ĐIỂM TỰ ĐỘNG (DỰA TRÊN MÔN HỌC ĐÃ NHẬN DIỆN) ===
+      NHIỆM VỤ CHÍNH:
+      1. **Phân tích File Đáp án/Tiêu chí (Nếu có):**
+         - Hãy phân biệt rõ đâu là **ĐỀ BÀI** (Câu hỏi) và đâu là **HƯỚNG DẪN CHẤM/THANG ĐIỂM**.
+         - **Xác định Max Score (Tổng điểm tối đa):** Cộng tổng tất cả điểm số trong thang điểm. Đừng mặc định là 10. Nếu thang điểm là 20 câu trắc nghiệm (mỗi câu 0.2) -> Tổng là 4. Nếu thang 100 -> Tổng là 100.
       
-      a) Nhóm Tự nhiên (Toán, KHTN, Tin, Công nghệ):
-         - **Logic đè Barem**: Nếu học sinh làm cách khác đáp án (dùng định lý khác, giải tắt hợp lý) nhưng logic đúng -> ĐIỂM TỐI ĐA.
-         - **Chấm bước**: Kết quả sai nhưng hướng giải/biến đổi đầu đúng -> Ghi nhận điểm thành phần.
-         - **KHTN**: Chấp nhận giải thích hiện tượng tương đương, không bắt bẻ câu chữ SGK.
+      2. **Quy tắc Số học & Điểm lẻ:**
+         - **Nhận diện số thập phân:** Hiểu rằng "0,25" và "0.25" là như nhau.
+         - **Cộng điểm chính xác:** Khi chấm, hãy cộng điểm từng phần nhỏ (0.25, 0.5, 0.75). Tuyệt đối không làm tròn bừa bãi. 
+         - Ví dụ: Câu 1 đúng nửa ý (0.5đ), câu 2 sai, câu 3 đúng (1đ) => Tổng 1.5.
 
-      b) Nhóm Xã hội (Văn, Sử-Địa, GDCD):
-         - **Semantic Matching**: Tuyệt đối KHÔNG bắt bẻ từng từ. Chỉ cần đúng Ý CHÍNH/TỪ KHÓA -> ĐIỂM TỐI ĐA.
-         - **Phát triển năng lực**: Đánh giá cao liên hệ thực tế, quan điểm cá nhân và tư duy phản biện.
+      3. **Đối chiếu Bài làm & Đáp án:**
+         - So sánh nội dung bài làm của học sinh với đáp án mẫu.
+         - Nếu học sinh chỉ làm 1 bài trong file ảnh, chỉ chấm bài đó dựa trên phần điểm tương ứng trong thang điểm.
+      
+      === QUY TẮC CHẤM THEO MÔN HỌC ===
+      - **Tự nhiên (Toán, Lý, Hóa):** Chấm theo bước (step-by-step). Kết quả sai nhưng hướng đúng vẫn có thể có điểm thành phần (nếu thang điểm cho phép). Logic đúng khác đáp án vẫn trọn điểm.
+      - **Xã hội (Văn, Sử, Địa):** Chấm theo ý (Key ideas). Không bắt bẻ từng từ.
+      - **Trắc nghiệm:** So khớp chính xác đáp án (A, B, C, D).
 
-      c) Ngoại ngữ (Tiếng Anh):
-         - Chú trọng độ chính xác ngữ pháp/từ vựng trong ngữ cảnh cụ thể.
-
-      d) Hoạt động trải nghiệm:
-         - Đánh giá dựa trên sự tham gia và cảm nhận cá nhân, không có đúng/sai tuyệt đối.
-
-      === QUY TẮC THEO CẤP HỌC ===
-      - **Tiểu học**: Chấm nới tay, ưu tiên khích lệ. Ngôn ngữ nhận xét ân cần, đơn giản (xưng hô Thầy/Cô - Con). Bỏ qua lỗi trình bày nhỏ.
-      - **THCS**: Chấm công tâm, tập trung vào tư duy logic và giải quyết vấn đề. Giải thích ngắn gọn.
-
-      === QUY TẮC TỌA ĐỘ (CỰC KỲ QUAN TRỌNG) ===
+      === QUY TẮC TRẢ VỀ TỌA ĐỘ (VISUAL FEEDBACK) ===
       - Khi trả về tọa độ (x, y) cho các lỗi sai hoặc điểm đúng:
       - **Tọa độ X**: Phải nằm ở **BÊN PHẢI** hoàn toàn so với chữ cuối cùng của dòng đó.
       - **Khoảng cách**: Hãy cộng thêm khoảng **3-5% chiều rộng** (padding) tính từ chữ cuối cùng, để dấu chấm (✓/✗) nằm tách biệt, **không được đè lên chữ**.
@@ -127,21 +125,22 @@ export const gradeSubmission = async (
     `;
 
     if (answerKeyFile) {
-      prompt += `\n- Có file đáp án mẫu đính kèm (ảnh/pdf). Hãy đọc kỹ.`;
+      prompt += `\n- Có file đính kèm (chứa Đề/Đáp án/Thang điểm). Hãy đọc kỹ cấu trúc của nó.`;
     }
 
     if (answerKeyText) {
-      prompt += `\n- Ghi chú/Đáp án từ giáo viên: "${answerKeyText}"`;
+      prompt += `\n- Ghi chú/Đáp án bổ sung từ giáo viên: "${answerKeyText}"`;
     }
 
     prompt += `
       \n=== YÊU CẦU ĐẦU RA (JSON) ===
-         - detectedSubject: Môn học bạn nhận diện được.
-         - detectedGradeLevel: Cấp học bạn nhận diện được.
-         - className: Tên lớp (nếu thấy).
-         - score: Tổng điểm (0-100).
-         - details: Danh sách lỗi/điểm đúng với tọa độ.
-         - summary: Nhận xét tổng quan (Tone giọng phù hợp với cấp học).
+         - detectedSubject: Môn học.
+         - detectedGradeLevel: Cấp học.
+         - className: Tên lớp.
+         - maxScore: Tổng điểm tối đa của đề thi (VD: 10, 20, 100).
+         - score: Tổng điểm học sinh đạt được (VD: 7.25, 8.5).
+         - details: Chi tiết lỗi/đúng kèm tọa độ.
+         - summary: Nhận xét.
     `;
 
     parts.push({ text: prompt });
@@ -154,7 +153,7 @@ export const gradeSubmission = async (
       config: {
         responseMimeType: "application/json",
         responseSchema: gradingSchema,
-        temperature: 0.4,
+        temperature: 0.2, // Giảm temperature để tính toán số học chính xác hơn
       },
     });
 
@@ -165,7 +164,6 @@ export const gradeSubmission = async (
     }
   } catch (error) {
     console.error("Gemini Grading Error:", error);
-    // Rethrow with a user-friendly message if possible, or just the error message
     throw new Error(error instanceof Error ? error.message : "Có lỗi xảy ra khi chấm điểm.");
   }
 };

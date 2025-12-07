@@ -11,6 +11,7 @@ export interface CorrectionPoint {
 
 export interface GradingResult {
   score: number;
+  maxScore: number; // Tổng điểm tối đa của bài thi (ví dụ: 10, 20, 100)
   letterGrade: string;
   summary: string;
   className?: string; // Tên lớp phát hiện được (VD: 5A, 9B)
@@ -37,6 +38,13 @@ export interface HistoryItem {
   images: string[]; // List of Base64 strings (pages)
   image?: string; // Deprecated: legacy support
   result: GradingResult;
+}
+
+export interface SavedRubric {
+  id: string;
+  name: string;
+  text: string;
+  file: { name: string; data: string; mimeType: string } | null;
 }
 
 export enum AppStep {

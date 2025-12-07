@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
-import { AppStep, GradingResult, HistoryItem, Annotation } from './types';
+import { AppStep, GradingResult, HistoryItem, Annotation, SavedRubric } from './types';
 import Camera from './components/Camera';
 import { gradeSubmission } from './services/geminiService';
 import { compressImage, base64ToFile, drawAnnotationsOnImage } from './utils/imageUtils';
 
-// Icons
+// --- ICONS ---
 const CameraIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
     <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 0 1 5.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 0 0 2.25 2.25h15A2.25 2.25 0 0 0 21.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 0 0-1.134-.175 2.31 2.31 0 0 1-1.64-1.055l-.822-1.316a2.192 2.192 0 0 0-1.736-1.039 48.774 48.774 0 0 0-5.232 0 2.192 2.192 0 0 0-1.736 1.039l-.821 1.316Z" />
@@ -96,11 +96,45 @@ const ChevronRightIcon = () => (
   </svg>
 );
 
+const ArrowDownTrayIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5M16.5 12 12 16.5m0 0L7.5 12m4.5 4.5V3" />
+  </svg>
+);
+
+const BookmarkIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
+  </svg>
+);
+
+const ZoomInIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+    <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
+  </svg>
+);
+
+const ZoomOutIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
+    <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM13.5 10.5h-6" />
+  </svg>
+);
+
+const PlusIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
+        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+    </svg>
+);
+
+// --- COMPONENT ---
 export default function App() {
   const [step, setStep] = useState<AppStep>(AppStep.SETUP);
   
   // Data States
   const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [savedRubrics, setSavedRubrics] = useState<SavedRubric[]>([]);
+  const [availableClasses, setAvailableClasses] = useState<string[]>([]);
+  
   const [isReviewing, setIsReviewing] = useState<boolean>(false); // True if viewing an old item
 
   // Input states
@@ -113,16 +147,27 @@ export default function App() {
 
   // Editable States (For Manual Correction)
   const [editableScore, setEditableScore] = useState<number | string>('');
+  const [editableMaxScore, setEditableMaxScore] = useState<number>(10);
   const [editableSummary, setEditableSummary] = useState<string>('');
   const [editableClassName, setEditableClassName] = useState<string>('');
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
-  const [activeTool, setActiveTool] = useState<'correct' | 'incorrect' | 'text'>('correct');
+  const [activeTool, setActiveTool] = useState<'correct' | 'incorrect' | 'text' | 'zoom'>('correct');
   
+  // Zoom State
+  const [zoomScale, setZoomScale] = useState<number>(1);
+  const [panPosition, setPanPosition] = useState({ x: 0, y: 0 });
+  const [isDragging, setIsDragging] = useState(false);
+  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+
   // Text Input State on Image
   const [activeInput, setActiveInput] = useState<{id: string, x: number, y: number, value: string, pageIndex: number} | null>(null);
 
-  // Share Modal State
+  // Modals & UI States
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isRubricModalOpen, setIsRubricModalOpen] = useState(false);
+  const [newRubricName, setNewRubricName] = useState('');
+  const [isClassModalOpen, setIsClassModalOpen] = useState(false);
+  const [newClassName, setNewClassName] = useState('');
 
   // History Group State
   const [expandedClasses, setExpandedClasses] = useState<Record<string, boolean>>({});
@@ -145,6 +190,9 @@ export default function App() {
              if (item.image && !item.images) {
                  return { ...item, images: [item.image] };
              }
+             if (!item.result.maxScore) {
+                 item.result.maxScore = 100; // Assume old default
+             }
              return item;
         });
         setHistory(migrated);
@@ -157,20 +205,34 @@ export default function App() {
       }
     }
 
-    // Load Saved Answer Key Text
+    // Load Rubrics
+    const savedRubricsData = localStorage.getItem('saved_rubrics');
+    if (savedRubricsData) {
+        try {
+            setSavedRubrics(JSON.parse(savedRubricsData));
+        } catch (e) {}
+    }
+
+    // Load Classes
+    const savedClassesData = localStorage.getItem('saved_classes');
+    if (savedClassesData) {
+        try {
+            setAvailableClasses(JSON.parse(savedClassesData));
+        } catch (e) {}
+    }
+
+    // Load Saved Answer Key Text (Transient)
     const savedAnswerKeyText = localStorage.getItem('saved_answerKeyText');
     if (savedAnswerKeyText) {
         setAnswerKeyText(savedAnswerKeyText);
     }
 
-    // Load Saved Answer Key File
+    // Load Saved Answer Key File (Transient)
     const savedAnswerKeyFile = localStorage.getItem('saved_answerKeyFile');
     if (savedAnswerKeyFile) {
         try {
             setAnswerKeyFile(JSON.parse(savedAnswerKeyFile));
-        } catch (e) {
-            console.error("Failed to load saved answer key file", e);
-        }
+        } catch (e) {}
     }
   }, []);
 
@@ -198,6 +260,93 @@ export default function App() {
     }));
   };
 
+  // --- Rubric Management ---
+  const saveRubric = () => {
+      if (!newRubricName.trim()) return;
+      
+      const newRubric: SavedRubric = {
+          id: Date.now().toString(),
+          name: newRubricName,
+          text: answerKeyText,
+          file: answerKeyFile
+      };
+
+      const updated = [...savedRubrics, newRubric];
+      setSavedRubrics(updated);
+      localStorage.setItem('saved_rubrics', JSON.stringify(updated));
+      setIsRubricModalOpen(false);
+      setNewRubricName('');
+  };
+
+  const loadRubric = (id: string) => {
+      const rubric = savedRubrics.find(r => r.id === id);
+      if (rubric) {
+          setAnswerKeyText(rubric.text);
+          setAnswerKeyFile(rubric.file);
+          // Update transient storage too
+          localStorage.setItem('saved_answerKeyText', rubric.text);
+          if (rubric.file) {
+              localStorage.setItem('saved_answerKeyFile', JSON.stringify(rubric.file));
+          } else {
+              localStorage.removeItem('saved_answerKeyFile');
+          }
+      }
+  };
+
+  const deleteRubric = (id: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if(confirm('Xóa bộ tiêu chí này?')) {
+        const updated = savedRubrics.filter(r => r.id !== id);
+        setSavedRubrics(updated);
+        localStorage.setItem('saved_rubrics', JSON.stringify(updated));
+      }
+  };
+
+  // --- Class Management ---
+  const addClass = () => {
+      if (!newClassName.trim()) return;
+      if (!availableClasses.includes(newClassName.trim())) {
+          const updated = [...availableClasses, newClassName.trim()];
+          setAvailableClasses(updated);
+          localStorage.setItem('saved_classes', JSON.stringify(updated));
+      }
+      setEditableClassName(newClassName.trim()); // Auto select
+      setIsClassModalOpen(false);
+      setNewClassName('');
+  };
+
+  const deleteClass = (cls: string, e: React.MouseEvent) => {
+      e.stopPropagation();
+      if(confirm(`Xóa lớp ${cls} khỏi danh sách?`)) {
+          const updated = availableClasses.filter(c => c !== cls);
+          setAvailableClasses(updated);
+          localStorage.setItem('saved_classes', JSON.stringify(updated));
+      }
+  };
+
+  // --- Export CSV Handler ---
+  const handleExportCSV = (e: React.MouseEvent, className: string, items: HistoryItem[]) => {
+    e.stopPropagation();
+    const headers = ["STT", "Ngày chấm", "Lớp", "Điểm số", "Tổng điểm", "Nhận xét"];
+    const rows = items.map((item, index) => {
+        const date = new Date(item.timestamp).toLocaleDateString('vi-VN');
+        const score = item.score.toString().replace('.', ','); 
+        const maxScore = (item.result.maxScore || 10).toString().replace('.', ',');
+        const summary = `"${item.result.summary.replace(/"/g, '""')}"`;
+        return [index + 1, date, `"${item.className}"`, score, maxScore, summary].join(",");
+    });
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Bang_Diem_${className}_${new Date().toISOString().slice(0,10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+
   // Focus input when activeInput appears
   useEffect(() => {
     if (activeInput && textInputRef.current) {
@@ -209,19 +358,14 @@ export default function App() {
   const handleAnswerKeyUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (file) {
-      // Create a compressed version to save to localStorage if it's an image
-      // If it's a PDF, we try to save as is, but warn if too big later
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64String = reader.result as string;
-        
         let fileDataToSave = {
             name: file.name,
             data: base64String,
             mimeType: file.type
         };
-
-        // Try to compress if it's an image to save storage space
         if (file.type.startsWith('image/')) {
             try {
                 const compressed = await compressImage(base64String, 1024, 0.7);
@@ -230,9 +374,7 @@ export default function App() {
                 console.warn("Failed to compress answer key image", e);
             }
         }
-
         setAnswerKeyFile(fileDataToSave);
-        
         try {
             localStorage.setItem('saved_answerKeyFile', JSON.stringify(fileDataToSave));
         } catch (e) {
@@ -253,7 +395,6 @@ export default function App() {
   // --- Handlers for Student Work (Capture/Upload) ---
   const handleCapture = (imageData: string) => {
     setCapturedImages(prev => [...prev, imageData]);
-    // Don't change step here, allow multiple captures
   };
 
   const handleStudentWorkUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -287,25 +428,21 @@ export default function App() {
     setIsReviewing(false); 
     setAnnotations([]); 
     setActiveInput(null);
+    setZoomScale(1);
+    setPanPosition({x:0, y:0});
     
     try {
-      // 1. Compress Student Images
       const compressedImagesPromise = capturedImages.map(img => compressImage(img, 1024, 0.7));
       const compressedStudentImages = await Promise.all(compressedImagesPromise);
 
-      // 2. Compress Answer Key Image (Already potentially compressed/loaded)
       let finalAnswerKeyFile = undefined;
       if (answerKeyFile) {
-         // If stored data is already good, use it. But logic here ensures we send good data.
-         // If it's a PDF stored as base64, we pass it.
-         // If it's an image, we ensure it is compressed (though handleAnswerKeyUpload did it).
          finalAnswerKeyFile = {
              mimeType: answerKeyFile.mimeType,
              data: answerKeyFile.data
          };
       }
 
-      // 3. Send to AI (Auto detect subject/grade)
       const data = await gradeSubmission(
           compressedStudentImages, 
           answerKeyText, 
@@ -314,20 +451,16 @@ export default function App() {
       
       setResult(data);
 
-      // 4. Auto-generate Annotations based on AI data
       const autoAnnotations: Annotation[] = [];
-
-      // Add Score Annotation (Top Left of First Page)
       autoAnnotations.push({
         id: 'auto-score',
-        x: 5, // 5% from left
-        y: 2, // 2% from top
+        x: 5, 
+        y: 2, 
         type: 'text',
-        text: `${data.score}`,
+        text: `${data.score}/${data.maxScore || 10}`,
         pageIndex: 0
       });
 
-      // Add Details Annotations
       data.details.forEach((detail, idx) => {
         if (typeof detail.x === 'number' && typeof detail.y === 'number') {
             autoAnnotations.push({
@@ -341,11 +474,17 @@ export default function App() {
       });
 
       setAnnotations(autoAnnotations);
-
-      // Initialize editable fields with AI results
       setEditableScore(data.score);
+      setEditableMaxScore(data.maxScore || 10);
       setEditableSummary(data.summary);
-      setEditableClassName(data.className || '');
+      
+      // Auto select class if previously selected, otherwise try AI detection
+      if (editableClassName) {
+          // Keep current class selection for batch grading
+      } else {
+          setEditableClassName(data.className || '');
+      }
+      
       setStep(AppStep.RESULTS);
     } catch (err) {
       console.error(err);
@@ -354,15 +493,45 @@ export default function App() {
     }
   };
 
-  // --- Annotation Logic (Simplified: Click to Add/Remove only) ---
+  // --- Zoom & Pan Logic ---
+  const handleZoomToggle = () => {
+      if (zoomScale === 1) {
+          setZoomScale(2.5);
+          setActiveTool('zoom'); // Switch to zoom tool automatically
+      } else {
+          setZoomScale(1);
+          setPanPosition({ x: 0, y: 0 });
+          setActiveTool('correct'); // Reset tool
+      }
+  };
 
+  const handleMouseDown = (e: React.MouseEvent) => {
+      if (zoomScale > 1) {
+          setIsDragging(true);
+          setDragStart({ x: e.clientX - panPosition.x, y: e.clientY - panPosition.y });
+      }
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+      if (isDragging && zoomScale > 1) {
+          setPanPosition({
+              x: e.clientX - dragStart.x,
+              y: e.clientY - dragStart.y
+          });
+      }
+  };
+
+  const handleMouseUp = () => {
+      setIsDragging(false);
+  };
+
+  // --- Annotation Logic ---
   const handleImageClick = (e: React.MouseEvent<HTMLDivElement>, pageIndex: number) => {
-    if (isReviewing) return;
+    if (isReviewing || zoomScale > 1) return; // Disable annotation in Zoom mode
     
     const container = imageContainerRefs.current[pageIndex];
     if (!container) return;
     
-    // If input is active, commit it (clicking outside logic)
     if (activeInput) {
         commitTextInput();
         return;
@@ -380,7 +549,7 @@ export default function App() {
             value: '',
             pageIndex
         });
-    } else {
+    } else if (activeTool !== 'zoom') {
         const newAnnotation: Annotation = {
             id: Date.now().toString(),
             x,
@@ -393,15 +562,13 @@ export default function App() {
   };
 
   const handleImageDoubleClick = (e: React.MouseEvent<HTMLDivElement>, pageIndex: number) => {
-    if (isReviewing) return;
+    if (isReviewing || zoomScale > 1) return;
     const container = imageContainerRefs.current[pageIndex];
     if (!container) return;
     e.preventDefault();
     e.stopPropagation();
 
-    if (activeInput) {
-        commitTextInput();
-    }
+    if (activeInput) commitTextInput();
 
     const rect = container.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -439,15 +606,32 @@ export default function App() {
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent) => {
-      if (e.key === 'Enter') {
-          commitTextInput();
-      }
+      if (e.key === 'Enter') commitTextInput();
   };
 
   // --- History & Persistence ---
+  // Save and go back to home
   const saveAndExit = async () => {
+    await performSave();
+    resetApp();
+  };
+
+  // Save and immediately go to camera (Batch flow)
+  const saveAndNext = async () => {
+      await performSave();
+      // Reset only images and results, keep Rubric and Class
+      setCapturedImages([]);
+      setResult(null);
+      setAnnotations([]);
+      setActiveInput(null);
+      setEditableScore('');
+      setEditableSummary('');
+      // setEditableClassName -> kept!
+      setStep(AppStep.CAMERA); // Go straight to camera
+  };
+
+  const performSave = async () => {
     if (result && capturedImages.length > 0) {
-      // Commit any pending text input
       let finalAnnotations = [...annotations];
       if (activeInput && activeInput.value.trim() !== '') {
          finalAnnotations.push({
@@ -460,7 +644,6 @@ export default function App() {
          });
       }
 
-      // Draw annotations on ALL images
       const annotatedImagesPromise = capturedImages.map((img, idx) => {
           const pageAnnotations = finalAnnotations.filter(a => a.pageIndex === idx);
           return drawAnnotationsOnImage(img, pageAnnotations);
@@ -468,20 +651,19 @@ export default function App() {
 
       const annotatedImages = await Promise.all(annotatedImagesPromise);
       await finishSaving(annotatedImages);
-    } else {
-        resetApp();
     }
   };
 
   const finishSaving = async (annotatedImages: string[]) => {
       if (!result) return;
-      const finalScore = typeof editableScore === 'number' ? editableScore : parseInt(editableScore as string) || 0;
+      const finalScore = typeof editableScore === 'number' ? editableScore : parseFloat(editableScore as string) || 0;
       const finalSummary = editableSummary;
       const finalClassName = editableClassName.trim() || 'Chưa phân lớp';
 
       const finalResult: GradingResult = {
           ...result,
           score: finalScore,
+          maxScore: editableMaxScore,
           summary: finalSummary,
           className: finalClassName
       };
@@ -499,25 +681,28 @@ export default function App() {
       const newHistory = [newItem, ...history];
       setHistory(newHistory);
       localStorage.setItem('grading_history', JSON.stringify(newHistory));
-      
-      // Auto expand the class group we just saved to
       setExpandedClasses(prev => ({...prev, [finalClassName]: true}));
       
-      resetApp();
+      // Auto-save the new class name if it's new
+      if (finalClassName !== 'Chưa phân lớp' && !availableClasses.includes(finalClassName)) {
+          const updatedClasses = [...availableClasses, finalClassName];
+          setAvailableClasses(updatedClasses);
+          localStorage.setItem('saved_classes', JSON.stringify(updatedClasses));
+      }
   }
 
   const viewHistoryItem = (item: HistoryItem) => {
-    // Handle migration for old items that might not have 'images'
     const imgs = item.images || (item.image ? [item.image] : []);
-    
     setCapturedImages(imgs);
     setResult(item.result);
     setEditableScore(item.result.score);
+    setEditableMaxScore(item.result.maxScore || 10);
     setEditableSummary(item.result.summary);
     setEditableClassName(item.className);
     setAnnotations([]); 
     setActiveInput(null);
     setIsReviewing(true);
+    setZoomScale(1);
     setStep(AppStep.RESULTS);
   };
 
@@ -545,20 +730,20 @@ export default function App() {
     setAnnotations([]);
     setActiveInput(null);
     setEditableScore('');
+    setEditableMaxScore(10);
     setEditableSummary('');
     setEditableClassName('');
+    setZoomScale(1);
   };
 
   // --- Sharing Logic ---
   const getShareText = () => {
     if (!result) return "";
-    return `KẾT QUẢ CHẤM BÀI${editableClassName ? ` - ${editableClassName}` : ''}\nĐiểm: ${editableScore}/100\nNhận xét: ${editableSummary}\n\nChấm bởi AI Grader VN`;
+    return `KẾT QUẢ CHẤM BÀI${editableClassName ? ` - ${editableClassName}` : ''}\nĐiểm: ${editableScore}/${editableMaxScore}\nNhận xét: ${editableSummary}\n\nChấm bởi AI Grader VN`;
   };
 
   const handleShareImage = async () => {
     if (!result || capturedImages.length === 0) return;
-    
-    // Commit any active input before sharing
     if (activeInput) commitTextInput();
 
     try {
@@ -567,14 +752,9 @@ export default function App() {
         text: getShareText(),
       };
 
-      // Create annotations snapshot
       const currentAnnotations = activeInput && activeInput.value.trim() ? 
         [...annotations, {id: activeInput.id, x: activeInput.x, y: activeInput.y, type: 'text', text: activeInput.value, pageIndex: activeInput.pageIndex} as Annotation] : 
         annotations;
-
-      // Only share the first image or stitch them? 
-      // Navigator share usually supports array of files. Let's try sending all.
-      // But limit to first 3 to avoid failure? Let's try all.
       
       const filePromises = capturedImages.map(async (img, idx) => {
           const pageAnnotations = currentAnnotations.filter(a => a.pageIndex === idx);
@@ -587,7 +767,6 @@ export default function App() {
       if (navigator.canShare && navigator.canShare({ files })) {
         shareData.files = files;
       } else if (files.length > 0 && navigator.canShare && navigator.canShare({files: [files[0]]})) {
-          // Fallback to first image if too many
            shareData.files = [files[0]];
       }
 
@@ -621,7 +800,6 @@ export default function App() {
     }
   };
 
-  // Check if we have enough info to proceed
   const isReady = answerKeyText.trim().length > 0 || answerKeyFile !== null;
 
   // ----------------------------------------------------------------------
@@ -646,16 +824,42 @@ export default function App() {
             )}
 
             {/* ANSWER KEY SECTION */}
-            <div className="flex flex-col gap-2">
-              <label className="text-sm font-bold text-gray-800 flex justify-between items-center">
-                <span>Đáp án mẫu / Tiêu chí</span>
-                <span className="text-xs font-normal text-gray-500">Bắt buộc</span>
-              </label>
+            <div className="flex flex-col gap-2 relative">
+              <div className="flex justify-between items-center">
+                  <label className="text-sm font-bold text-gray-800 flex items-center gap-2">
+                    Đáp án mẫu / Tiêu chí
+                    <button 
+                        onClick={() => saveRubric()}
+                        disabled={!answerKeyText && !answerKeyFile}
+                        className={`text-xs px-2 py-1 rounded border flex items-center gap-1 transition-colors ${!answerKeyText && !answerKeyFile ? 'text-gray-300 border-gray-100' : 'text-indigo-600 border-indigo-200 hover:bg-indigo-50'}`}
+                        title="Lưu bộ tiêu chí này để dùng lại"
+                    >
+                         {/* Toggle Save Modal logic handled below */}
+                         <span onClick={(e) => { e.stopPropagation(); if(answerKeyText || answerKeyFile) setIsRubricModalOpen(true) }}>+ Lưu mẫu</span>
+                    </button>
+                  </label>
+                  
+                  {savedRubrics.length > 0 && (
+                      <select 
+                        onChange={(e) => loadRubric(e.target.value)}
+                        className="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 max-w-[150px] truncate"
+                        defaultValue=""
+                      >
+                          <option value="" disabled>-- Mẫu đã lưu --</option>
+                          {savedRubrics.map(r => (
+                              <option key={r.id} value={r.id}>{r.name}</option>
+                          ))}
+                      </select>
+                  )}
+              </div>
+
+              {/* Rubric Load Logic Helper */}
+              <input type="hidden" value="" /> 
 
               <textarea
                 value={answerKeyText}
                 onChange={(e) => setAnswerKeyText(e.target.value)}
-                placeholder="Nhập đáp án hoặc ghi chú cho AI (VD: 'Chấp nhận cách giải khác miễn là đúng logic'...)"
+                placeholder="Nhập đáp án hoặc ghi chú cho AI..."
                 className="w-full h-24 p-4 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-indigo-500 focus:outline-none resize-none text-gray-800 placeholder-gray-400 text-sm"
               />
 
@@ -687,6 +891,25 @@ export default function App() {
                     className="hidden" 
                  />
               </div>
+
+              {/* Saved Rubrics Management Mini-View (Only if Rubric Modal Open) */}
+              {isRubricModalOpen && (
+                  <div className="absolute inset-0 bg-white/95 backdrop-blur z-10 flex flex-col items-center justify-center p-4 rounded-xl border border-gray-200 shadow-lg">
+                      <h3 className="font-bold text-gray-800 mb-4">Lưu bộ tiêu chí mới</h3>
+                      <input 
+                        autoFocus
+                        type="text" 
+                        placeholder="Tên bộ tiêu chí (VD: Toán GK2 Lớp 5)"
+                        className="w-full border border-gray-300 rounded-lg p-2 mb-4 text-sm"
+                        value={newRubricName}
+                        onChange={e => setNewRubricName(e.target.value)}
+                      />
+                      <div className="flex gap-2 w-full">
+                          <button onClick={() => setIsRubricModalOpen(false)} className="flex-1 py-2 bg-gray-100 rounded-lg text-sm text-gray-600">Hủy</button>
+                          <button onClick={saveRubric} className="flex-1 py-2 bg-indigo-600 text-white rounded-lg text-sm font-bold">Lưu lại</button>
+                      </div>
+                  </div>
+              )}
             </div>
 
             {/* ACTION BUTTONS */}
@@ -799,7 +1022,12 @@ export default function App() {
               ) : (
                 <div className="flex flex-col gap-4 pb-8">
                   {Object.entries(groupedHistory).map(([className, items]: [string, HistoryItem[]]) => {
-                     const avgScore = Math.round(items.reduce((acc, i) => acc + i.score, 0) / items.length);
+                     const avgPercentage = Math.round(items.reduce((acc, i) => {
+                         const max = i.result.maxScore || 10;
+                         const pct = (i.score / max) * 100;
+                         return acc + pct;
+                     }, 0) / items.length);
+
                      const isExpanded = expandedClasses[className];
                      
                      return (
@@ -807,7 +1035,7 @@ export default function App() {
                            {/* Class Header */}
                            <div 
                               onClick={() => toggleClassGroup(className)}
-                              className="bg-gray-50 p-3 flex items-center justify-between cursor-pointer hover:bg-gray-100 transition-colors"
+                              className="bg-gray-50 p-3 flex items-center justify-between cursor-pointer hover:bg-gray-100 transition-colors group"
                            >
                               <div className="flex items-center gap-2">
                                  {isExpanded ? <ChevronDownIcon /> : <ChevronRightIcon />}
@@ -817,8 +1045,18 @@ export default function App() {
                                      <span className="text-xs px-2 py-0.5 bg-gray-200 rounded-full text-gray-600">{items.length} bài</span>
                                  </div>
                               </div>
-                              <div className="text-xs font-semibold text-indigo-600">
-                                 TB: {avgScore}đ
+                              <div className="flex items-center gap-3">
+                                  <button 
+                                    onClick={(e) => handleExportCSV(e, className, items)}
+                                    className="p-1.5 text-indigo-500 hover:bg-indigo-50 rounded-lg transition-colors flex items-center gap-1 bg-white border border-indigo-100 shadow-sm"
+                                    title="Xuất Excel/CSV"
+                                  >
+                                      <ArrowDownTrayIcon />
+                                      <span className="text-xs font-medium hidden sm:inline">Xuất điểm</span>
+                                  </button>
+                                  <div className="text-xs font-semibold text-indigo-600">
+                                    TB: {avgPercentage}%
+                                  </div>
                               </div>
                            </div>
                            
@@ -826,8 +1064,11 @@ export default function App() {
                            {isExpanded && (
                                <div className="divide-y divide-gray-100">
                                   {items.map((item) => {
-                                    // Handle legacy items that might only have 'image'
                                     const thumb = item.images && item.images.length > 0 ? item.images[0] : item.image;
+                                    const max = item.result.maxScore || 10;
+                                    const percentage = (item.score / max) * 100;
+                                    const colorClass = percentage >= 80 ? 'text-green-600' : percentage >= 50 ? 'text-yellow-600' : 'text-red-600';
+                                    
                                     return (
                                         <div 
                                         key={item.id}
@@ -844,8 +1085,8 @@ export default function App() {
                                         </div>
                                         <div className="flex-1 min-w-0">
                                             <div className="flex items-center justify-between">
-                                            <span className={`font-bold text-sm ${item.score >= 50 ? 'text-green-600' : 'text-red-600'}`}>
-                                                {item.score} đ
+                                            <span className={`font-bold text-sm ${colorClass}`}>
+                                                {item.score}/{max}
                                             </span>
                                             <span className="text-[10px] text-gray-400">
                                                 {new Date(item.timestamp).toLocaleDateString('vi-VN', {day: '2-digit', month: '2-digit'})}
@@ -924,17 +1165,27 @@ export default function App() {
   // ----------------------------------------------------------------------
   if (step === AppStep.RESULTS && result) {
     const scoreNum = typeof editableScore === 'number' ? editableScore : parseFloat(editableScore as string) || 0;
-    const scoreColor = scoreNum >= 80 ? 'text-green-600' : scoreNum >= 50 ? 'text-yellow-600' : 'text-red-600';
-    const borderColor = scoreNum >= 80 ? 'border-green-600' : scoreNum >= 50 ? 'border-yellow-600' : 'border-red-600';
+    const maxScoreNum = editableMaxScore || 10;
+    const percentage = (scoreNum / maxScoreNum) * 100;
+
+    const scoreColor = percentage >= 80 ? 'text-green-600' : percentage >= 50 ? 'text-yellow-600' : 'text-red-600';
+    const borderColor = percentage >= 80 ? 'border-green-600' : percentage >= 50 ? 'border-yellow-600' : 'border-red-600';
 
     return (
-      <div className="min-h-screen bg-gray-50 pb-32 relative">
+      <div className="min-h-screen bg-gray-50 pb-36 relative overflow-x-hidden">
         {/* Sticky Header */}
         <div className="sticky top-0 bg-white/80 backdrop-blur-md border-b border-gray-200 p-4 z-10 flex justify-between items-center shadow-sm">
           <h2 className="font-bold text-gray-800">
-            {isReviewing ? 'Xem lại kết quả' : 'Chỉnh sửa & Chấm điểm'}
+            {isReviewing ? 'Xem lại kết quả' : 'Chấm điểm'}
           </h2>
           <div className="flex items-center gap-3">
+             <button 
+               onClick={handleZoomToggle}
+               className={`p-2 rounded-full transition-colors ${zoomScale > 1 ? 'bg-indigo-100 text-indigo-600' : 'text-gray-500 hover:bg-gray-100'}`}
+               title="Zoom"
+             >
+               {zoomScale > 1 ? <ZoomOutIcon /> : <ZoomInIcon />}
+             </button>
             <button 
               onClick={() => setIsShareModalOpen(true)}
               className="p-2 text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors"
@@ -951,35 +1202,63 @@ export default function App() {
 
         <div className="p-4 max-w-2xl mx-auto space-y-6">
           
-          {/* Class Name Input */}
-          <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-gray-200 shadow-sm">
+          {/* Class Name Input (Enhanced) */}
+          <div className="flex items-center gap-3 bg-white p-3 rounded-xl border border-gray-200 shadow-sm relative">
              <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
                  <UserGroupIcon />
              </div>
              <div className="flex-1">
-                 <label className="text-xs text-gray-500 block mb-1">Tên Lớp (Lưu vào danh sách)</label>
-                 <input 
-                    type="text"
-                    value={editableClassName}
-                    onChange={(e) => setEditableClassName(e.target.value)}
-                    placeholder="VD: 5A, 9B..."
-                    className="w-full font-bold text-gray-800 outline-none placeholder-gray-300"
-                    disabled={isReviewing}
-                 />
-             </div>
-             <div className="flex flex-col gap-1 items-end">
-                 {result.detectedSubject && (
-                     <div className="text-xs font-bold bg-indigo-100 text-indigo-700 px-2 py-1 rounded">
-                        {result.detectedSubject}
+                 <label className="text-xs text-gray-500 block mb-1">Tên Lớp</label>
+                 {isReviewing ? (
+                      <span className="font-bold text-gray-800">{editableClassName}</span>
+                 ) : (
+                     <div className="flex gap-2">
+                        <select 
+                            value={editableClassName}
+                            onChange={(e) => {
+                                if(e.target.value === '__new__') {
+                                    setIsClassModalOpen(true);
+                                } else {
+                                    setEditableClassName(e.target.value);
+                                }
+                            }}
+                            className="w-full font-bold text-gray-800 outline-none bg-transparent"
+                        >
+                            <option value="">-- Chọn hoặc thêm lớp --</option>
+                            {availableClasses.map(c => <option key={c} value={c}>{c}</option>)}
+                            <option value="__new__" className="text-indigo-600">+ Thêm lớp mới...</option>
+                        </select>
                      </div>
                  )}
-                 {result.detectedGradeLevel && (
-                     <div className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500">
-                        {result.detectedGradeLevel}
-                     </div>
-                 )}
              </div>
+             {/* Delete class button if selected and not reviewing */}
+             {!isReviewing && editableClassName && availableClasses.includes(editableClassName) && (
+                 <button onClick={(e) => deleteClass(editableClassName, e)} className="text-gray-300 hover:text-red-500">
+                     <TrashIcon />
+                 </button>
+             )}
           </div>
+
+          {/* Class Add Modal */}
+          {isClassModalOpen && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+                  <div className="bg-white rounded-xl p-4 w-full max-w-xs shadow-xl">
+                      <h3 className="font-bold mb-3">Thêm Lớp Mới</h3>
+                      <input 
+                        autoFocus
+                        type="text" 
+                        className="w-full border p-2 rounded mb-3"
+                        placeholder="VD: 12A1"
+                        value={newClassName}
+                        onChange={e => setNewClassName(e.target.value)}
+                      />
+                      <div className="flex gap-2">
+                          <button onClick={() => setIsClassModalOpen(false)} className="flex-1 py-2 bg-gray-100 rounded">Hủy</button>
+                          <button onClick={addClass} className="flex-1 py-2 bg-indigo-600 text-white rounded font-bold">Thêm</button>
+                      </div>
+                  </div>
+              </div>
+          )}
 
           {/* Editable Score Card */}
           <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col items-center relative">
@@ -988,7 +1267,7 @@ export default function App() {
                     <PencilIcon />
                 </div>
             )}
-            <div className={`w-32 h-32 rounded-full border-4 ${borderColor} flex items-center justify-center mb-4 overflow-hidden bg-white`}>
+            <div className={`w-36 h-36 rounded-full border-4 ${borderColor} flex items-center justify-center mb-4 overflow-hidden bg-white`}>
                 <div className="text-center w-full">
                     {isReviewing ? (
                          <span className={`block text-4xl font-bold ${scoreColor}`}>{editableScore}</span>
@@ -999,10 +1278,11 @@ export default function App() {
                             onChange={(e) => setEditableScore(e.target.value)}
                             className={`block w-full text-center text-4xl font-bold ${scoreColor} focus:outline-none focus:bg-gray-50`}
                             min="0"
-                            max="100"
                         />
                     )}
-                    <span className={`text-sm font-bold ${scoreColor}`}>/ 100</span>
+                    <span className={`text-sm font-bold ${scoreColor} border-t border-gray-100 px-4 pt-1 mt-1 block`}>
+                        / {editableMaxScore}
+                    </span>
                 </div>
             </div>
             {isReviewing ? (
@@ -1022,22 +1302,28 @@ export default function App() {
             <div className="sticky top-20 z-10 flex justify-center bg-transparent pointer-events-none">
                 <div className="bg-white shadow-lg border border-gray-100 rounded-full p-1 flex gap-1 pointer-events-auto">
                      <button 
-                        onClick={() => setActiveTool('correct')}
+                        onClick={() => { setActiveTool('correct'); setZoomScale(1); }}
                         className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${activeTool === 'correct' ? 'bg-green-100 text-green-700' : 'text-gray-600 hover:bg-gray-50'}`}
                     >
                         <span>✓</span>
                     </button>
                     <button 
-                        onClick={() => setActiveTool('incorrect')}
+                        onClick={() => { setActiveTool('incorrect'); setZoomScale(1); }}
                         className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${activeTool === 'incorrect' ? 'bg-red-100 text-red-700' : 'text-gray-600 hover:bg-gray-50'}`}
                     >
                         <span>✗</span>
                     </button>
                     <button 
-                        onClick={() => setActiveTool('text')}
+                        onClick={() => { setActiveTool('text'); setZoomScale(1); }}
                         className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${activeTool === 'text' ? 'bg-indigo-100 text-indigo-700' : 'text-gray-600 hover:bg-gray-50'}`}
                     >
                         <TextToolIcon />
+                    </button>
+                     <button 
+                        onClick={handleZoomToggle}
+                        className={`flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${zoomScale > 1 ? 'bg-blue-100 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}
+                    >
+                        {zoomScale > 1 ? <ZoomOutIcon /> : <ZoomInIcon />}
                     </button>
                 </div>
             </div>
@@ -1047,17 +1333,27 @@ export default function App() {
           <div className="space-y-4">
             {capturedImages.map((img, pageIndex) => (
                 <div key={pageIndex} className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                    <div className="p-3 border-b border-gray-100 bg-gray-50">
+                    <div className="p-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
                         <span className="text-xs font-bold text-gray-500 uppercase tracking-wide">Trang {pageIndex + 1}</span>
+                        {zoomScale > 1 && <span className="text-[10px] text-blue-500 animate-pulse">Chế độ Zoom: Kéo để di chuyển</span>}
                     </div>
-                    <div className="relative bg-gray-100 overflow-hidden">
+                    <div className="relative bg-gray-100 overflow-hidden" style={{ height: 'auto', minHeight: '300px' }}>
                         <div 
                             ref={el => imageContainerRefs.current[pageIndex] = el}
-                            className="relative w-full cursor-crosshair select-none"
+                            className={`relative w-full select-none ${zoomScale > 1 ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'}`}
+                            style={{
+                                transform: `scale(${zoomScale}) translate(${panPosition.x / zoomScale}px, ${panPosition.y / zoomScale}px)`,
+                                transformOrigin: 'top left',
+                                transition: isDragging ? 'none' : 'transform 0.2s ease-out'
+                            }}
+                            onMouseDown={handleMouseDown}
+                            onMouseMove={handleMouseMove}
+                            onMouseUp={handleMouseUp}
+                            onMouseLeave={handleMouseUp}
                             onClick={(e) => handleImageClick(e, pageIndex)}
                             onDoubleClick={(e) => handleImageDoubleClick(e, pageIndex)}
                         >
-                            <img src={img} alt={`Student Work Page ${pageIndex+1}`} className="w-full h-auto block" />
+                            <img src={img} alt={`Student Work Page ${pageIndex+1}`} className="w-full h-auto block pointer-events-none" />
                             
                             {/* Render Annotations for this page */}
                             {annotations.filter(ann => ann.pageIndex === pageIndex).map((ann) => (
@@ -1156,13 +1452,20 @@ export default function App() {
                         onClick={resetApp}
                         className="flex-1 py-3 bg-white border-2 border-gray-200 text-gray-600 rounded-xl font-semibold hover:bg-gray-50"
                     >
-                        Hủy bỏ
+                        Hủy
                     </button>
                     <button 
                         onClick={saveAndExit}
-                        className="flex-1 py-3 bg-indigo-600 text-white rounded-xl shadow-lg hover:bg-indigo-700 font-semibold"
+                        className="flex-1 py-3 bg-indigo-100 text-indigo-700 rounded-xl font-semibold hover:bg-indigo-200"
                     >
-                        Lưu kết quả
+                        Lưu & Thoát
+                    </button>
+                    <button 
+                        onClick={saveAndNext}
+                        className="flex-[1.5] py-3 bg-indigo-600 text-white rounded-xl shadow-lg hover:bg-indigo-700 font-semibold flex items-center justify-center gap-2"
+                    >
+                        <span>Lưu & Chấm tiếp</span>
+                        <ChevronRightIcon />
                     </button>
                  </>
              )}
