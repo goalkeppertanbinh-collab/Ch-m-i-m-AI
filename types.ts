@@ -50,6 +50,7 @@ export interface SavedRubric {
 export enum AppStep {
   SETUP = 'SETUP',
   CAMERA = 'CAMERA',
+  CROP = 'CROP',
   ANALYZING = 'ANALYZING',
   RESULTS = 'RESULTS',
 }

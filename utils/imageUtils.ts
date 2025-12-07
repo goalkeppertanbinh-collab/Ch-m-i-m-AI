@@ -138,3 +138,45 @@ export const drawAnnotationsOnImage = (base64Image: string, annotations: Annotat
     img.onerror = () => resolve(base64Image);
   });
 };
+
+/**
+ * Cắt ảnh dựa trên vùng chọn.
+ */
+export const getCroppedImg = (imageSrc: string, pixelCrop: { x: number, y: number, width: number, height: number }): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.src = imageSrc;
+    image.crossOrigin = "anonymous";
+    
+    image.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      if (!ctx) {
+        reject(new Error("Không thể tạo canvas context"));
+        return;
+      }
+
+      // Set width/height to the cropped size
+      canvas.width = pixelCrop.width;
+      canvas.height = pixelCrop.height;
+
+      // Draw the cropped portion
+      ctx.drawImage(
+        image,
+        pixelCrop.x,
+        pixelCrop.y,
+        pixelCrop.width,
+        pixelCrop.height,
+        0,
+        0,
+        pixelCrop.width,
+        pixelCrop.height
+      );
+
+      resolve(canvas.toDataURL('image/jpeg'));
+    };
+    
+    image.onerror = (error) => reject(error);
+  });
+};

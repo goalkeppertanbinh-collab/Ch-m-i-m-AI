@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { AppStep, GradingResult, HistoryItem, Annotation, SavedRubric } from './types';
 import Camera from './components/Camera';
+import ImageCropper from './components/ImageCropper';
 import { gradeSubmission, resetAIClient } from './services/geminiService';
 import { compressImage, base64ToFile, drawAnnotationsOnImage } from './utils/imageUtils';
 
@@ -139,6 +140,9 @@ export default function App() {
   const [capturedImages, setCapturedImages] = useState<string[]>([]);
   const [result, setResult] = useState<GradingResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Temporary Image for Cropping
+  const [tempImage, setTempImage] = useState<string | null>(null);
 
   // Editable States (For Manual Correction)
   const [editableScore, setEditableScore] = useState<number | string>('');
@@ -424,20 +428,48 @@ export default function App() {
 
   // --- Handlers for Student Work (Capture/Upload) ---
   const handleCapture = (imageData: string) => {
-    setCapturedImages(prev => [...prev, imageData]);
+    // Instead of adding directly, go to crop step
+    setTempImage(imageData);
+    setStep(AppStep.CROP);
+  };
+
+  const handleCropComplete = (croppedImage: string) => {
+    setCapturedImages(prev => [...prev, croppedImage]);
+    setTempImage(null);
+    setStep(AppStep.SETUP); // Go back to list to allow more captures
+  };
+
+  const handleCropCancel = () => {
+    setTempImage(null);
+    setStep(AppStep.SETUP); // Back to list without saving
   };
 
   const handleStudentWorkUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (files && files.length > 0) {
-      Array.from(files).forEach((file: File) => {
+      // Logic for multi-upload: If single file, crop it. If multiple, skip crop for now (too complex UI) or crop first one.
+      // For simplicity, let's just add them. Adding crop for bulk upload is tricky UX.
+      // BUT, if user uploads 1 file, let's allow crop.
+      if (files.length === 1) {
+          const file = files[0];
           const reader = new FileReader();
           reader.onloadend = () => {
-            const base64String = reader.result as string;
-            setCapturedImages(prev => [...prev, base64String]);
+             const base64String = reader.result as string;
+             setTempImage(base64String);
+             setStep(AppStep.CROP);
           };
           reader.readAsDataURL(file);
-      });
+      } else {
+          // Bulk upload - skip crop
+          Array.from(files).forEach((file: File) => {
+              const reader = new FileReader();
+              reader.onloadend = () => {
+                const base64String = reader.result as string;
+                setCapturedImages(prev => [...prev, base64String]);
+              };
+              reader.readAsDataURL(file);
+          });
+      }
       event.target.value = '';
     }
   };
@@ -764,6 +796,7 @@ export default function App() {
     setEditableSummary('');
     setEditableClassName('');
     setZoomScale(1);
+    setTempImage(null);
   };
 
   // --- Sharing Logic ---
@@ -1199,6 +1232,19 @@ export default function App() {
         onCapture={handleCapture} 
         onCancel={() => setStep(AppStep.SETUP)} 
         captureCount={capturedImages.length}
+      />
+    );
+  }
+
+  // ----------------------------------------------------------------------
+  // RENDER: CROP STEP
+  // ----------------------------------------------------------------------
+  if (step === AppStep.CROP && tempImage) {
+    return (
+      <ImageCropper 
+        imageSrc={tempImage}
+        onCropComplete={handleCropComplete}
+        onCancel={handleCropCancel}
       />
     );
   }
