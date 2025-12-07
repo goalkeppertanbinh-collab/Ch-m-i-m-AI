@@ -7,7 +7,6 @@ export const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.7)
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = base64Str;
-    // Không set crossOrigin cho data URL để tránh lỗi trên một số trình duyệt mobile
     
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -29,10 +28,7 @@ export const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.7)
         return;
       }
 
-      // Vẽ ảnh lên canvas với kích thước mới
       ctx.drawImage(img, 0, 0, width, height);
-
-      // Xuất ra base64 mới với định dạng JPEG và chất lượng nén
       resolve(canvas.toDataURL('image/jpeg', quality));
     };
 
@@ -42,9 +38,6 @@ export const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.7)
   });
 };
 
-/**
- * Chuyển đổi chuỗi Base64 thành đối tượng File.
- */
 export const base64ToFile = (base64: string, filename: string): File => {
   const arr = base64.split(',');
   const mimeMatch = arr[0].match(/:(.*?);/);
@@ -58,9 +51,6 @@ export const base64ToFile = (base64: string, filename: string): File => {
   return new File([u8arr], filename, { type: mime });
 };
 
-/**
- * Vẽ các dấu chấm (annotations) lên ảnh.
- */
 export const drawAnnotationsOnImage = (base64Image: string, annotations: Annotation[]): Promise<string> => {
   return new Promise((resolve) => {
     if (annotations.length === 0) {
@@ -126,9 +116,6 @@ export const drawAnnotationsOnImage = (base64Image: string, annotations: Annotat
   });
 };
 
-/**
- * Cắt ảnh dựa trên vùng chọn.
- */
 export const getCroppedImg = (imageSrc: string, pixelCrop: { x: number, y: number, width: number, height: number }): Promise<string> => {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -169,8 +156,8 @@ export const getCroppedImg = (imageSrc: string, pixelCrop: { x: number, y: numbe
 };
 
 /**
- * Phát hiện vùng nội dung giấy (màu sáng) trên nền tối.
- * Trả về rect {x, y, width, height} (đơn vị pixel trên ảnh gốc)
+ * Phát hiện biên giấy bằng thuật toán dò cạnh (Simple Edge Detection).
+ * Thay vì chỉ tìm độ sáng, ta tìm sự thay đổi độ tương phản.
  */
 export const detectPaperBounds = (imageSrc: string): Promise<{x: number, y: number, width: number, height: number} | null> => {
     return new Promise((resolve) => {
@@ -178,94 +165,96 @@ export const detectPaperBounds = (imageSrc: string): Promise<{x: number, y: numb
         img.src = imageSrc;
         img.onload = () => {
             try {
-                // Resize xuống canvas nhỏ để xử lý nhanh (ví dụ: max 200px)
-                const scaleSize = 200;
+                // 1. Resize xuống kích thước nhỏ để xử lý nhanh (ví dụ: chiều rộng 400px)
+                const processingWidth = 400;
+                const scale = processingWidth / img.width;
+                const processingHeight = Math.round(img.height * scale);
+
                 const canvas = document.createElement('canvas');
-                const scale = Math.min(scaleSize / img.width, scaleSize / img.height);
-                canvas.width = img.width * scale;
-                canvas.height = img.height * scale;
+                canvas.width = processingWidth;
+                canvas.height = processingHeight;
                 const ctx = canvas.getContext('2d');
                 if (!ctx) { resolve(null); return; }
                 
-                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                // Vẽ ảnh lên canvas nhỏ
+                ctx.drawImage(img, 0, 0, processingWidth, processingHeight);
+                const imageData = ctx.getImageData(0, 0, processingWidth, processingHeight);
                 const { data, width, height } = imageData;
                 
-                // Thuật toán đơn giản:
-                // Quét từ 4 phía vào trung tâm. Tìm dòng/cột đầu tiên có độ sáng trung bình vượt ngưỡng.
-                // Giả định giấy trắng (sáng) trên nền tối.
-                
-                const getBrightness = (idx: number) => (data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114);
-                const threshold = 100; // Ngưỡng độ sáng (0-255). Điều chỉnh nếu cần.
-                
-                let minX = 0, minY = 0, maxX = width, maxY = height;
-                
-                // Scan Top down
-                for (let y = 0; y < height / 2; y++) {
-                    let brightCount = 0;
-                    for (let x = width * 0.25; x < width * 0.75; x++) { // Check middle 50% horizontally
-                        const idx = (Math.floor(y) * width + Math.floor(x)) * 4;
-                        if (getBrightness(idx) > threshold) brightCount++;
-                    }
-                    if (brightCount > (width * 0.5 * 0.3)) { // Nếu > 30% dòng là sáng
-                        minY = y;
-                        break;
-                    }
-                }
-                
-                // Scan Bottom up
-                for (let y = height - 1; y > height / 2; y--) {
-                    let brightCount = 0;
-                    for (let x = width * 0.25; x < width * 0.75; x++) {
-                        const idx = (Math.floor(y) * width + Math.floor(x)) * 4;
-                        if (getBrightness(idx) > threshold) brightCount++;
-                    }
-                    if (brightCount > (width * 0.5 * 0.3)) {
-                        maxY = y;
-                        break;
+                // 2. Dò cạnh (Edge Detection) đơn giản
+                // Duyệt qua pixel, nếu sự chênh lệch màu với pixel bên cạnh > ngưỡng -> Đó là cạnh
+                const edgePointsX: number[] = [];
+                const edgePointsY: number[] = [];
+                const threshold = 30; // Ngưỡng chênh lệch màu sắc (0-255)
+
+                // Hàm lấy giá trị Grayscale của pixel
+                const getGray = (i: number) => 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2];
+
+                // Quét để tìm các điểm biên
+                // Bước nhảy (step) = 4 để tăng tốc độ
+                for (let y = 5; y < height - 5; y += 4) {
+                    for (let x = 5; x < width - 5; x += 4) {
+                        const i = (y * width + x) * 4;
+                        const gray = getGray(i);
+
+                        // So sánh với pixel bên phải (x+2) và bên dưới (y+2)
+                        const iRight = (y * width + (x + 2)) * 4;
+                        const iDown = ((y + 2) * width + x) * 4;
+                        
+                        const diffRight = Math.abs(gray - getGray(iRight));
+                        const diffDown = Math.abs(gray - getGray(iDown));
+
+                        // Nếu chênh lệch lớn -> Đây là cạnh
+                        if (diffRight > threshold || diffDown > threshold) {
+                            edgePointsX.push(x);
+                            edgePointsY.push(y);
+                        }
                     }
                 }
 
-                // Scan Left to Right
-                for (let x = 0; x < width / 2; x++) {
-                    let brightCount = 0;
-                    for (let y = height * 0.25; y < height * 0.75; y++) {
-                         const idx = (Math.floor(y) * width + Math.floor(x)) * 4;
-                         if (getBrightness(idx) > threshold) brightCount++;
-                    }
-                    if (brightCount > (height * 0.5 * 0.3)) {
-                        minX = x;
-                        break;
-                    }
-                }
-
-                // Scan Right to Left
-                for (let x = width - 1; x > width / 2; x--) {
-                    let brightCount = 0;
-                    for (let y = height * 0.25; y < height * 0.75; y++) {
-                         const idx = (Math.floor(y) * width + Math.floor(x)) * 4;
-                         if (getBrightness(idx) > threshold) brightCount++;
-                    }
-                    if (brightCount > (height * 0.5 * 0.3)) {
-                        maxX = x;
-                        break;
-                    }
-                }
-                
-                // Scale back to original size
-                const detectedRect = {
-                    x: minX / scale,
-                    y: minY / scale,
-                    width: (maxX - minX) / scale,
-                    height: (maxY - minY) / scale
-                };
-                
-                // Sanity check: nếu vùng chọn quá nhỏ (< 20% ảnh), trả về null (dùng mặc định)
-                if (detectedRect.width < img.width * 0.2 || detectedRect.height < img.height * 0.2) {
+                if (edgePointsX.length < 50) { // Không tìm thấy đủ cạnh
                     resolve(null);
-                } else {
-                    resolve(detectedRect);
+                    return;
                 }
+
+                // 3. Tìm vùng bao quanh các điểm cạnh (Bounding Box)
+                // Loại bỏ nhiễu bằng cách lấy percentile (bỏ 5% ngoại lai ở mỗi phía)
+                edgePointsX.sort((a, b) => a - b);
+                edgePointsY.sort((a, b) => a - b);
+
+                const cropMinX = edgePointsX[Math.floor(edgePointsX.length * 0.05)];
+                const cropMaxX = edgePointsX[Math.floor(edgePointsX.length * 0.95)];
+                const cropMinY = edgePointsY[Math.floor(edgePointsY.length * 0.05)];
+                const cropMaxY = edgePointsY[Math.floor(edgePointsY.length * 0.95)];
+
+                let detectedRect = {
+                    x: cropMinX,
+                    y: cropMinY,
+                    width: cropMaxX - cropMinX,
+                    height: cropMaxY - cropMinY
+                };
+
+                // Kiểm tra sanity: Nếu vùng chọn quá nhỏ hoặc quá to (gần bằng ảnh gốc), có thể là nhiễu hoặc không cần crop
+                // Tuy nhiên, với camscan, nếu không tìm thấy rõ, ta thường crop vào khoảng 10% lề.
+                
+                // Nếu detect quá nhỏ (< 30% diện tích), fallback về crop mặc định an toàn (inset 10%)
+                const areaRatio = (detectedRect.width * detectedRect.height) / (width * height);
+                if (areaRatio < 0.2) {
+                     detectedRect = {
+                         x: width * 0.1,
+                         y: height * 0.1,
+                         width: width * 0.8,
+                         height: height * 0.8
+                     };
+                }
+
+                // 4. Scale ngược lại kích thước gốc
+                resolve({
+                    x: detectedRect.x / scale,
+                    y: detectedRect.y / scale,
+                    width: detectedRect.width / scale,
+                    height: detectedRect.height / scale
+                });
 
             } catch (e) {
                 console.warn("Auto detect failed", e);
