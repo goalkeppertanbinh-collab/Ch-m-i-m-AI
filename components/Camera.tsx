@@ -3,13 +3,15 @@ import React, { useRef, useEffect, useState, useCallback } from 'react';
 interface CameraProps {
   onCapture: (imageData: string) => void;
   onCancel: () => void;
+  captureCount: number;
 }
 
-const Camera: React.FC<CameraProps> = ({ onCapture, onCancel }) => {
+const Camera: React.FC<CameraProps> = ({ onCapture, onCancel, captureCount }) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [flash, setFlash] = useState(false);
 
   const startCamera = async () => {
     try {
@@ -58,10 +60,9 @@ const Camera: React.FC<CameraProps> = ({ onCapture, onCancel }) => {
         // Get base64 data
         const imageData = canvas.toDataURL('image/jpeg', 0.85);
         
-        // Stop camera immediately after capture to prevent resource drain
-        if (stream) {
-          stream.getTracks().forEach(track => track.stop());
-        }
+        // Flash effect
+        setFlash(true);
+        setTimeout(() => setFlash(false), 150);
         
         onCapture(imageData);
       }
@@ -82,13 +83,17 @@ const Camera: React.FC<CameraProps> = ({ onCapture, onCancel }) => {
             </button>
           </div>
         ) : (
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="absolute inset-0 w-full h-full object-cover"
-          />
+          <>
+             <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted
+                className="absolute inset-0 w-full h-full object-cover"
+            />
+            {/* Flash Overlay */}
+            <div className={`absolute inset-0 bg-white pointer-events-none transition-opacity duration-150 ${flash ? 'opacity-70' : 'opacity-0'}`} />
+          </>
         )}
         
         {/* Overlay guides */}
@@ -100,12 +105,12 @@ const Camera: React.FC<CameraProps> = ({ onCapture, onCancel }) => {
         </div>
       </div>
 
-      <div className="h-24 bg-black flex items-center justify-around pb-6 pt-2 px-6">
+      <div className="h-28 bg-black flex items-center justify-around pb-6 pt-4 px-6">
         <button 
           onClick={onCancel}
-          className="text-white/80 text-sm font-medium p-2 hover:text-white"
+          className="text-white font-medium px-4 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 text-sm"
         >
-          Hủy
+          {captureCount > 0 ? `Xong (${captureCount})` : 'Hủy'}
         </button>
 
         <button
@@ -116,7 +121,7 @@ const Camera: React.FC<CameraProps> = ({ onCapture, onCancel }) => {
           <div className="w-14 h-14 rounded-full border-2 border-black"></div>
         </button>
 
-        <div className="w-10"></div> {/* Spacer for symmetry */}
+        <div className="w-16"></div> {/* Spacer for symmetry with the Cancel/Done button width */}
       </div>
 
       <canvas ref={canvasRef} className="hidden" />
