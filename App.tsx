@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { AppStep, GradingResult, HistoryItem, Annotation, SavedRubric } from './types';
 import Camera from './components/Camera';
-import { gradeSubmission } from './services/geminiService';
+import { gradeSubmission, resetAIClient } from './services/geminiService';
 import { compressImage, base64ToFile, drawAnnotationsOnImage } from './utils/imageUtils';
 
 // --- ICONS ---
@@ -102,12 +102,6 @@ const ArrowDownTrayIcon = () => (
   </svg>
 );
 
-const BookmarkIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-    <path strokeLinecap="round" strokeLinejoin="round" d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
-  </svg>
-);
-
 const ZoomInIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
     <path strokeLinecap="round" strokeLinejoin="round" d="m21 21-5.197-5.197m0 0A7.5 7.5 0 1 0 5.196 5.196a7.5 7.5 0 0 0 10.607 10.607ZM10.5 7.5v6m3-3h-6" />
@@ -120,11 +114,12 @@ const ZoomOutIcon = () => (
   </svg>
 );
 
-const PlusIcon = () => (
-    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-4 h-4">
-        <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
-    </svg>
+const CogIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-6 h-6">
+    <path strokeLinecap="round" strokeLinejoin="round" d="M10.34 15.84c-.688-.06-1.386-.09-2.09-.09H7.5a4.5 4.5 0 1 1 0-9h.75c.704 0 1.402-.03 2.09-.09m0 9.18c.253.962.584 1.892.985 2.783.247.55.06 1.21-.463 1.511l-.657.38c-.551.318-1.26.117-1.527-.461a20.845 20.845 0 0 1-1.44-4.282m3.102.069a18.03 18.03 0 0 1-.59-4.59c0-1.586.205-3.124.59-4.59m0 9.18a23.848 23.848 0 0 1 8.835 2.535M10.34 6.66a23.847 23.847 0 0 0 8.835-2.535m0 0A23.74 23.74 0 0 0 18.795 3m.38 1.125a23.91 23.91 0 0 1 1.014 5.795 23.944 23.944 0 0 1-1.014 5.795m-3.846 4.81c-.52.441-1.236.457-1.766.041l-.657-.514c-.53-.415-.658-1.135-.292-1.685.64-.972 1.173-1.996 1.585-3.064m-1.547-10.424c-.37-.551-.235-1.27.293-1.685l.656-.514c.53-.416 1.247-.4 1.767.042.825 1.002 1.536 2.08 2.126 3.208" />
+  </svg>
 );
+
 
 // --- COMPONENT ---
 export default function App() {
@@ -168,6 +163,11 @@ export default function App() {
   const [newRubricName, setNewRubricName] = useState('');
   const [isClassModalOpen, setIsClassModalOpen] = useState(false);
   const [newClassName, setNewClassName] = useState('');
+  
+  // API Key Settings UI
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
+  const [customApiKey, setCustomApiKey] = useState('');
+  const [hasStoredKey, setHasStoredKey] = useState(false);
 
   // History Group State
   const [expandedClasses, setExpandedClasses] = useState<Record<string, boolean>>({});
@@ -234,6 +234,12 @@ export default function App() {
             setAnswerKeyFile(JSON.parse(savedAnswerKeyFile));
         } catch (e) {}
     }
+
+    // Check for Stored API Key
+    const storedKey = localStorage.getItem('gemini_api_key');
+    if (storedKey) {
+        setHasStoredKey(true);
+    }
   }, []);
 
   // 2. Persist inputs whenever they change
@@ -259,6 +265,27 @@ export default function App() {
       [className]: !prev[className]
     }));
   };
+
+  // --- API Key Management ---
+  const saveApiKey = () => {
+      if (customApiKey.trim()) {
+          localStorage.setItem('gemini_api_key', customApiKey.trim());
+          setHasStoredKey(true);
+          resetAIClient(); // Reset the client to use new key
+          setCustomApiKey('');
+          setShowApiKeyInput(false);
+          alert('Đã lưu API Key thành công!');
+      }
+  };
+
+  const removeApiKey = () => {
+      if (confirm('Bạn có chắc chắn muốn xóa API Key đã lưu?')) {
+          localStorage.removeItem('gemini_api_key');
+          setHasStoredKey(false);
+          resetAIClient(); // Reset to try env key
+          alert('Đã xóa API Key.');
+      }
+  }
 
   // --- Rubric Management ---
   const saveRubric = () => {
@@ -292,6 +319,9 @@ export default function App() {
           }
       }
   };
+
+  // Helper for loading loadRubric wrapper (needed due to React event typings)
+  const handleLoadRubric = (id: string) => loadRubric(id);
 
   const deleteRubric = (id: string, e: React.MouseEvent) => {
       e.stopPropagation();
@@ -809,12 +839,55 @@ export default function App() {
     return (
       <div className="min-h-screen flex flex-col bg-white">
         <div className="flex-1 max-w-md mx-auto w-full p-6 flex flex-col">
-          <header className="mb-6 mt-4">
-            <h1 className="text-3xl font-bold text-indigo-900 mb-2">Chấm điểm AI</h1>
-            <p className="text-gray-500 text-sm">
-              Cung cấp đáp án mẫu và bài làm của học sinh để chấm tự động.
-            </p>
+          <header className="mb-6 mt-4 flex items-center justify-between">
+            <div>
+                <h1 className="text-3xl font-bold text-indigo-900 mb-1">Chấm điểm AI</h1>
+                <p className="text-gray-500 text-sm">
+                Cung cấp đáp án mẫu và bài làm của học sinh.
+                </p>
+            </div>
+            <button 
+                onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                className={`p-2 rounded-full transition-colors ${hasStoredKey ? 'text-green-600 bg-green-50' : 'text-gray-400 bg-gray-50 hover:bg-gray-100'}`}
+                title="Cấu hình API Key"
+            >
+                <CogIcon />
+            </button>
           </header>
+
+          {/* API Key Input Section (Toggleable) */}
+          {showApiKeyInput && (
+              <div className="mb-6 p-4 bg-gray-50 border border-gray-200 rounded-xl animate-fade-in-up">
+                  <h3 className="font-bold text-sm text-gray-700 mb-2">Cấu hình API Key (Google Gemini)</h3>
+                  <p className="text-xs text-gray-500 mb-3">
+                      Nhập khóa API cá nhân của bạn để sử dụng riêng. Khóa được lưu bảo mật trên trình duyệt của bạn.
+                  </p>
+                  <div className="flex gap-2">
+                      <input 
+                        type="password" 
+                        placeholder={hasStoredKey ? "Đã lưu API Key (••••••••)" : "Dán API Key vào đây..."}
+                        className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                        value={customApiKey}
+                        onChange={(e) => setCustomApiKey(e.target.value)}
+                      />
+                      <button 
+                        onClick={saveApiKey}
+                        disabled={!customApiKey.trim()}
+                        className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold disabled:bg-gray-300"
+                      >
+                          Lưu
+                      </button>
+                  </div>
+                  {hasStoredKey && (
+                      <button 
+                        onClick={removeApiKey}
+                        className="text-red-500 text-xs mt-2 hover:underline"
+                      >
+                          Xóa Key đã lưu & dùng mặc định
+                      </button>
+                  )}
+              </div>
+          )}
 
           <div className="flex-1 flex flex-col gap-5">
             {errorMsg && (
@@ -841,7 +914,7 @@ export default function App() {
                   
                   {savedRubrics.length > 0 && (
                       <select 
-                        onChange={(e) => loadRubric(e.target.value)}
+                        onChange={(e) => handleLoadRubric(e.target.value)}
                         className="text-xs border border-gray-300 rounded px-2 py-1 bg-white text-gray-700 max-w-[150px] truncate"
                         defaultValue=""
                       >

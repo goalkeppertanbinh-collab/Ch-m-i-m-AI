@@ -5,12 +5,21 @@ import { GradingResult } from "../types";
 // where process.env might be undefined during initial load.
 let ai: GoogleGenAI | null = null;
 
+// Hàm để reset client khi người dùng cập nhật API Key mới
+export const resetAIClient = () => {
+  ai = null;
+};
+
 const getAIClient = () => {
   if (!ai) {
-    // API_KEY is expected to be defined by the build environment (e.g., Vercel)
-    const apiKey = process.env.API_KEY;
+    // 1. Ưu tiên Key người dùng nhập (Lưu trong LocalStorage)
+    const userKey = typeof localStorage !== 'undefined' ? localStorage.getItem('gemini_api_key') : null;
+    
+    // 2. Nếu không có, dùng Key từ biến môi trường
+    const apiKey = userKey || process.env.API_KEY;
+
     if (!apiKey) {
-      throw new Error("API Key chưa được cấu hình. Vui lòng kiểm tra biến môi trường.");
+      throw new Error("API Key chưa được cấu hình. Vui lòng nhập API Key trong phần Cài đặt hoặc kiểm tra biến môi trường.");
     }
     ai = new GoogleGenAI({ apiKey });
   }
