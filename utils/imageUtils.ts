@@ -2,9 +2,6 @@ import { Annotation } from "../types";
 
 /**
  * Nén và thay đổi kích thước ảnh để tối ưu hóa tốc độ gửi API.
- * @param base64Str Chuỗi base64 của ảnh gốc.
- * @param maxWidth Chiều rộng tối đa (mặc định 1024px là đủ cho AI đọc văn bản).
- * @param quality Chất lượng nén JPEG (0.0 - 1.0).
  */
 export const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.7): Promise<string> => {
   return new Promise((resolve, reject) => {
@@ -47,7 +44,6 @@ export const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.7)
 
 /**
  * Chuyển đổi chuỗi Base64 thành đối tượng File.
- * Dùng để chia sẻ qua Navigator Share API.
  */
 export const base64ToFile = (base64: string, filename: string): File => {
   const arr = base64.split(',');
@@ -63,8 +59,7 @@ export const base64ToFile = (base64: string, filename: string): File => {
 };
 
 /**
- * Vẽ các dấu chấm (annotations) lên ảnh và trả về base64 mới.
- * Dùng khi Lưu hoặc Chia sẻ để "chốt" kết quả.
+ * Vẽ các dấu chấm (annotations) lên ảnh.
  */
 export const drawAnnotationsOnImage = (base64Image: string, annotations: Annotation[]): Promise<string> => {
   return new Promise((resolve) => {
@@ -87,12 +82,9 @@ export const drawAnnotationsOnImage = (base64Image: string, annotations: Annotat
         return;
       }
 
-      // 1. Vẽ ảnh gốc
       ctx.drawImage(img, 0, 0);
 
-      // 2. Vẽ các dấu chấm
-      // Thiết lập font và style
-      const fontSize = Math.max(20, img.width * 0.05); // Responsive font size
+      const fontSize = Math.max(20, img.width * 0.05); 
       
       ctx.lineWidth = 3;
 
@@ -100,7 +92,6 @@ export const drawAnnotationsOnImage = (base64Image: string, annotations: Annotat
         const x = (ann.x / 100) * canvas.width;
         const y = (ann.y / 100) * canvas.height;
 
-        // Xử lý căn lề
         if (ann.id === 'auto-score') {
              ctx.textAlign = 'left';
              ctx.textBaseline = 'top';
@@ -110,21 +101,18 @@ export const drawAnnotationsOnImage = (base64Image: string, annotations: Annotat
         }
 
         if (ann.type === 'text' && ann.text) {
-          // Vẽ Text (Điểm số hoặc ghi chú)
           ctx.font = `bold ${fontSize}px Arial`;
-          ctx.fillStyle = '#dc2626'; // Red
+          ctx.fillStyle = '#dc2626'; 
           ctx.fillText(ann.text, x, y);
         } else if (ann.type === 'correct') {
-          // Vẽ dấu Tick xanh
           ctx.font = `bold ${fontSize}px Arial`;
-          ctx.fillStyle = '#16a34a'; // green-600
+          ctx.fillStyle = '#16a34a'; 
           ctx.strokeStyle = '#fff';
           ctx.strokeText('✓', x, y);
           ctx.fillText('✓', x, y);
         } else if (ann.type === 'incorrect') {
-          // Vẽ dấu X đỏ
           ctx.font = `bold ${fontSize}px Arial`;
-          ctx.fillStyle = '#dc2626'; // red-600
+          ctx.fillStyle = '#dc2626'; 
           ctx.strokeStyle = '#fff';
           ctx.strokeText('✗', x, y);
           ctx.fillText('✗', x, y);
@@ -145,8 +133,6 @@ export const getCroppedImg = (imageSrc: string, pixelCrop: { x: number, y: numbe
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.src = imageSrc;
-    // Bỏ crossOrigin="anonymous" vì imageSrc là base64 data URL cục bộ.
-    // Việc thêm crossOrigin có thể gây lỗi "tainted canvas" trên một số trình duyệt khi dùng data URI.
     
     image.onload = () => {
       const canvas = document.createElement('canvas');
@@ -157,11 +143,9 @@ export const getCroppedImg = (imageSrc: string, pixelCrop: { x: number, y: numbe
         return;
       }
 
-      // Set width/height to the cropped size
       canvas.width = pixelCrop.width;
       canvas.height = pixelCrop.height;
 
-      // Draw the cropped portion
       ctx.drawImage(
         image,
         pixelCrop.x,
@@ -174,7 +158,6 @@ export const getCroppedImg = (imageSrc: string, pixelCrop: { x: number, y: numbe
         pixelCrop.height
       );
 
-      // Trả về base64
       resolve(canvas.toDataURL('image/jpeg'));
     };
     
@@ -184,3 +167,111 @@ export const getCroppedImg = (imageSrc: string, pixelCrop: { x: number, y: numbe
     };
   });
 };
+
+/**
+ * Phát hiện vùng nội dung giấy (màu sáng) trên nền tối.
+ * Trả về rect {x, y, width, height} (đơn vị pixel trên ảnh gốc)
+ */
+export const detectPaperBounds = (imageSrc: string): Promise<{x: number, y: number, width: number, height: number} | null> => {
+    return new Promise((resolve) => {
+        const img = new Image();
+        img.src = imageSrc;
+        img.onload = () => {
+            try {
+                // Resize xuống canvas nhỏ để xử lý nhanh (ví dụ: max 200px)
+                const scaleSize = 200;
+                const canvas = document.createElement('canvas');
+                const scale = Math.min(scaleSize / img.width, scaleSize / img.height);
+                canvas.width = img.width * scale;
+                canvas.height = img.height * scale;
+                const ctx = canvas.getContext('2d');
+                if (!ctx) { resolve(null); return; }
+                
+                ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                const { data, width, height } = imageData;
+                
+                // Thuật toán đơn giản:
+                // Quét từ 4 phía vào trung tâm. Tìm dòng/cột đầu tiên có độ sáng trung bình vượt ngưỡng.
+                // Giả định giấy trắng (sáng) trên nền tối.
+                
+                const getBrightness = (idx: number) => (data[idx] * 0.299 + data[idx+1] * 0.587 + data[idx+2] * 0.114);
+                const threshold = 100; // Ngưỡng độ sáng (0-255). Điều chỉnh nếu cần.
+                
+                let minX = 0, minY = 0, maxX = width, maxY = height;
+                
+                // Scan Top down
+                for (let y = 0; y < height / 2; y++) {
+                    let brightCount = 0;
+                    for (let x = width * 0.25; x < width * 0.75; x++) { // Check middle 50% horizontally
+                        const idx = (Math.floor(y) * width + Math.floor(x)) * 4;
+                        if (getBrightness(idx) > threshold) brightCount++;
+                    }
+                    if (brightCount > (width * 0.5 * 0.3)) { // Nếu > 30% dòng là sáng
+                        minY = y;
+                        break;
+                    }
+                }
+                
+                // Scan Bottom up
+                for (let y = height - 1; y > height / 2; y--) {
+                    let brightCount = 0;
+                    for (let x = width * 0.25; x < width * 0.75; x++) {
+                        const idx = (Math.floor(y) * width + Math.floor(x)) * 4;
+                        if (getBrightness(idx) > threshold) brightCount++;
+                    }
+                    if (brightCount > (width * 0.5 * 0.3)) {
+                        maxY = y;
+                        break;
+                    }
+                }
+
+                // Scan Left to Right
+                for (let x = 0; x < width / 2; x++) {
+                    let brightCount = 0;
+                    for (let y = height * 0.25; y < height * 0.75; y++) {
+                         const idx = (Math.floor(y) * width + Math.floor(x)) * 4;
+                         if (getBrightness(idx) > threshold) brightCount++;
+                    }
+                    if (brightCount > (height * 0.5 * 0.3)) {
+                        minX = x;
+                        break;
+                    }
+                }
+
+                // Scan Right to Left
+                for (let x = width - 1; x > width / 2; x--) {
+                    let brightCount = 0;
+                    for (let y = height * 0.25; y < height * 0.75; y++) {
+                         const idx = (Math.floor(y) * width + Math.floor(x)) * 4;
+                         if (getBrightness(idx) > threshold) brightCount++;
+                    }
+                    if (brightCount > (height * 0.5 * 0.3)) {
+                        maxX = x;
+                        break;
+                    }
+                }
+                
+                // Scale back to original size
+                const detectedRect = {
+                    x: minX / scale,
+                    y: minY / scale,
+                    width: (maxX - minX) / scale,
+                    height: (maxY - minY) / scale
+                };
+                
+                // Sanity check: nếu vùng chọn quá nhỏ (< 20% ảnh), trả về null (dùng mặc định)
+                if (detectedRect.width < img.width * 0.2 || detectedRect.height < img.height * 0.2) {
+                    resolve(null);
+                } else {
+                    resolve(detectedRect);
+                }
+
+            } catch (e) {
+                console.warn("Auto detect failed", e);
+                resolve(null);
+            }
+        };
+        img.onerror = () => resolve(null);
+    });
+}
