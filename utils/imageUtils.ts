@@ -10,8 +10,8 @@ export const compressImage = (base64Str: string, maxWidth = 1024, quality = 0.7)
   return new Promise((resolve, reject) => {
     const img = new Image();
     img.src = base64Str;
-    img.crossOrigin = "anonymous";
-
+    // Không set crossOrigin cho data URL để tránh lỗi trên một số trình duyệt mobile
+    
     img.onload = () => {
       const canvas = document.createElement('canvas');
       let width = img.width;
@@ -75,7 +75,6 @@ export const drawAnnotationsOnImage = (base64Image: string, annotations: Annotat
 
     const img = new Image();
     img.src = base64Image;
-    img.crossOrigin = "anonymous";
     
     img.onload = () => {
       const canvas = document.createElement('canvas');
@@ -146,7 +145,8 @@ export const getCroppedImg = (imageSrc: string, pixelCrop: { x: number, y: numbe
   return new Promise((resolve, reject) => {
     const image = new Image();
     image.src = imageSrc;
-    image.crossOrigin = "anonymous";
+    // Bỏ crossOrigin="anonymous" vì imageSrc là base64 data URL cục bộ.
+    // Việc thêm crossOrigin có thể gây lỗi "tainted canvas" trên một số trình duyệt khi dùng data URI.
     
     image.onload = () => {
       const canvas = document.createElement('canvas');
@@ -174,9 +174,13 @@ export const getCroppedImg = (imageSrc: string, pixelCrop: { x: number, y: numbe
         pixelCrop.height
       );
 
+      // Trả về base64
       resolve(canvas.toDataURL('image/jpeg'));
     };
     
-    image.onerror = (error) => reject(error);
+    image.onerror = (error) => {
+        console.error("Lỗi load ảnh để crop:", error);
+        reject(error);
+    };
   });
 };
